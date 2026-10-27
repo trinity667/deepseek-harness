@@ -1,19 +1,17 @@
+# render.yaml (blueprint)
 services:
   - type: web
     name: deepseek-harness
     env: node
     region: oregon
-    plan: free
+    plan: standard
     buildCommand: |
       npm install -g pnpm@11.28.5 &&
       pnpm install --frozen-lockfile &&
       pnpm run build
-    startCommand: node --import tsx/esm apps/cli/src/bin.ts web --no-open --host 0.0.0.0 --port $PORT
+    startCommand: node --import tsx/esm apps/cli/src/bin.ts web --no-open --host 127.0.0.1 --port $PORT
     envVars:
-      - key: NODE_VERSION
-        value: 24.9.0
-      - key: PORT
-        value: 10000
       - key: NODE_ENV
         value: production
-    healthCheckPath: /
+      - key: DSH_HOST
+        value: 127.0.0.1
