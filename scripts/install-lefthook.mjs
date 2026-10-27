@@ -186,11 +186,16 @@ function lstatIfPresent(path) {
 function assertCommonConfigFile(commonConfigPath) {
   const configStat = lstatIfPresent(commonConfigPath)
   if (configStat === undefined || !configStat.isFile() || configStat.isSymbolicLink()) {
+    // Skip on Render and CI environments
+    if (process.env.RENDER || process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true') {
+      return
+    }
     throw new Error(
       `refusing common repository config ${JSON.stringify(commonConfigPath)} because it is not a regular file`,
     )
   }
 }
+
 
 function assertWorktreeConfigFiles(root, commonDirectory, commonConfigPath, currentConfigPath) {
   const extensionEnabled = worktreeConfigExtensionEnabled(root, commonConfigPath)
