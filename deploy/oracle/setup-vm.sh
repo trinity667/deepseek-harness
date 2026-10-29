@@ -43,5 +43,5 @@ Done. Next steps (see deploy/oracle/README.md):
   2. Fill DSH_PUBLIC_HOST and CLOUDFLARE_TUNNEL_TOKEN in $ENV_FILE
   3. docker compose -f deploy/oracle/compose.yml up -d freellmapi
   4. Configure FreeLLMAPI through an SSH tunnel, copy its API key into FREE_LLM_API_KEY
-  5. DSH_COMMIT=\$(git rev-parse HEAD) docker compose -f deploy/oracle/compose.yml up -d --build
+  5. docker compose -f deploy/oracle/compose.yml pull && docker compose -f deploy/oracle/compose.yml up -d
 EOF

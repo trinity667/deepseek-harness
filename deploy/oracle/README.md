@@ -4,7 +4,7 @@ Ce dossier installe sur **une VM Oracle Cloud Always Free** :
 
 - **FreeLLMAPI** (image officielle `ghcr.io/tashfeenahmed/freellmapi`) : le routeur
   qui fait tourner tes clés API et bascule entre les modèles ;
-- **DeepSeek Harness** (`dsh web`), compilé depuis ce dépôt, branché sur FreeLLMAPI ;
+- **DeepSeek Harness** (`dsh web`), image `ghcr.io/trinity667/deepseek-harness` construite par GitHub Actions, branchée sur FreeLLMAPI ;
 - **cloudflared** : le tunnel Cloudflare qui donne une adresse HTTPS publique
   **sans ouvrir aucun port**, avec **Cloudflare Access** qui exige une connexion
   avant d'atteindre l'interface.
@@ -22,7 +22,7 @@ Tout est gratuit. Il te faut seulement un **nom de domaine géré par Cloudflare
 |---|---|
 | `setup-vm.sh` | Prépare la VM : Docker, swap de 4 Go, clone du dépôt, `.env` avec une clé de chiffrement |
 | `compose.yml` | Les trois services ; seuls des ports locaux (`127.0.0.1`) sont utilisés |
-| `Dockerfile` | Image du harness (compile `pnpm run build`, tourne en utilisateur non-root) |
+| `Dockerfile` | Recette de l'image du harness, construite par GitHub Actions (`.github/workflows/deploy-image.yml`) ; tourne en utilisateur non-root |
 | `dsh/freellmapi.patch.yml` | Config du harness : route `freellmapi`, réessais, modèle `auto`, pas de titres LLM |
 | `.env.example` | Modèle des secrets ; la copie `.env` n'est jamais commitée |
 
@@ -100,14 +100,14 @@ Dans <https://one.dash.cloudflare.com> (Zero Trust, offre gratuite) :
    - méthode de connexion : *One-time PIN* (code reçu par e-mail).
 4. Dans `.env`, mets `DSH_PUBLIC_HOST=dsh.mondomaine.com`.
 
-## 5. Compiler et lancer le harness
+## 5. Lancer le harness
 
 ```bash
 cd ~/deepseek-harness
-DSH_COMMIT=$(git rev-parse HEAD) docker compose -f deploy/oracle/compose.yml up -d --build
+docker compose -f deploy/oracle/compose.yml pull && docker compose -f deploy/oracle/compose.yml up -d
 ```
 
-La première compilation prend du temps (comptes 20 à 40 minutes sur 2 OCPU).
+L'image est déjà construite par GitHub Actions : la VM la télécharge seulement.
 Ensuite, récupère l'adresse de connexion, qui contient un **jeton de lancement**
 valable pour ce démarrage du processus :
 
@@ -136,7 +136,7 @@ Ces contrôles ne dépendent ni de toi ni de moi :
 
 ```bash
 cd ~/deepseek-harness && git pull
-DSH_COMMIT=$(git rev-parse HEAD) docker compose -f deploy/oracle/compose.yml up -d --build
+docker compose -f deploy/oracle/compose.yml pull && docker compose -f deploy/oracle/compose.yml up -d
 ```
 
 Pour FreeLLMAPI, change la version de l'image dans `compose.yml`, puis

@@ -3,7 +3,7 @@
 # cloudflared dials out to Cloudflare, which enforces Cloudflare Access.
 #
 #   cp deploy/oracle/.env.example deploy/oracle/.env   # then fill it in
-#   docker compose -f deploy/oracle/compose.yml up -d --build
+#   docker compose -f deploy/oracle/compose.yml up -d
 
 services:
   freellmapi:
@@ -25,12 +25,8 @@ services:
       retries: 3
 
   dsh:
-    build:
-      context: ../..
-      dockerfile: deploy/oracle/Dockerfile
-      args:
-        DSH_CLIENT_COMMIT_HASH: ${DSH_COMMIT:-0000000}
-    image: deepseek-harness:local
+    # Built for amd64 and arm64 by .github/workflows/deploy-image.yml.
+    image: ghcr.io/trinity667/deepseek-harness:latest
     # Host network so dsh can bind 127.0.0.1 (it rejects wildcard binds) and
     # reach FreeLLMAPI at 127.0.0.1:3001.
     network_mode: host
