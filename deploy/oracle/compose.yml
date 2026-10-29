@@ -2,13 +2,19 @@
 # Nothing listens on a public address: FreeLLMAPI and dsh bind loopback, and
 # cloudflared dials out to Cloudflare, which enforces Cloudflare Access.
 #
-#   cp deploy/oracle/.env.example deploy/oracle/.env   # then fill it in
+# Secrets are split per service so the agent's shell (inside `dsh`) never sees
+# FreeLLMAPI's encryption key or admin password:
+#   .env            compose interpolation only: DSH_PUBLIC_HOST, CLOUDFLARE_TUNNEL_TOKEN
+#   freellmapi.env  ENCRYPTION_KEY, optional FREEAPI_CONFIG_JSON (first admin)
+#   dsh.env         FREE_LLM_API_KEY (FreeLLMAPI's unified key)
+#
+# bootstrap.sh writes all three; by hand, copy the *.example files and fill them in.
 #   docker compose -f deploy/oracle/compose.yml up -d
 
 services:
   freellmapi:
     image: ghcr.io/tashfeenahmed/freellmapi:v0.16.12
-    env_file: .env
+    env_file: freellmapi.env
     environment:
       NODE_ENV: production
       PORT: 3001
@@ -30,7 +36,7 @@ services:
     # Host network so dsh can bind 127.0.0.1 (it rejects wildcard binds) and
     # reach FreeLLMAPI at 127.0.0.1:3001.
     network_mode: host
-    env_file: .env
+    env_file: dsh.env
     command:
       - web
       - --patch
@@ -50,7 +56,7 @@ services:
     restart: unless-stopped
 
   cloudflared:
-    image: cloudflare/cloudflared:2026.10.0
+    image: cloudflare/cloudflared:2026.10.6
     network_mode: host
     command: tunnel --no-autoupdate run
     environment:

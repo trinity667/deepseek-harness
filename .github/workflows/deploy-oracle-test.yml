@@ -1,0 +1,99 @@
+name: Deploy Oracle test
+
+# Proves deploy/oracle on the same CPU architecture as an Oracle Ampere VM:
+# validates cloud-init.yaml with cloud-init's own schema checker, runs
+# bootstrap.sh from this checkout against the freshly published image, then
+# checks that both services listen on loopback only, that FreeLLMAPI enforces
+# its key and dsh its launch token. cloudflared gets a dummy token here and is
+# expected to keep restarting.
+on:
+  workflow_run:
+    workflows: [Deploy image]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    name: Bootstrap on arm64
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    env:
+      DSH_DIR: ${{ runner.temp }}/dsh
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Validate cloud-init.yaml
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cloud-init
+          cloud-init schema --config-file deploy/oracle/cloud-init.yaml
+
+      - name: Run bootstrap.sh
+        run: |
+          mkdir -p "$DSH_DIR"
+          cat > "$DSH_DIR/settings.env" <<'EOF'
+          DOMAIN=example.com
+          ADMIN_EMAIL=ci@example.com
+          CLOUDFLARE_TUNNEL_TOKEN=ci-dummy-token
+          EOF
+          sudo DSH_DIR="$DSH_DIR" DSH_SOURCE_DIR="$PWD/deploy/oracle" \
+            bash deploy/oracle/bootstrap.sh > bootstrap.log 2>&1 || { cat bootstrap.log; exit 1; }
+          # Show the banner without the launch token or the admin password.
+          sed -E 's/token=[A-Za-z0-9_-]+/token=***/; s/(mot de passe[^:]*: ).*/\1***/' bootstrap.log
+
+      - name: Check services
+        run: |
+          compose() { sudo docker compose --project-directory "$DSH_DIR" -f "$DSH_DIR/compose.yml" "$@"; }
+          expect() { # expect <description> <wanted> <actual>
+            if [ "$2" = "$3" ]; then echo "OK   $1 ($3)"; else echo "FAIL $1: wanted $2, got $3"; exit 1; fi
+          }
+          refuse() { # refuse <description> <command...>: the command must fail
+            local what="$1"; shift
+            if "$@" >/dev/null 2>&1; then echo "FAIL $what"; exit 1; else echo "OK   $what"; fi
+          }
+          code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+
+          KEY="$(sudo sed -n 's/^FREE_LLM_API_KEY=//p' "$DSH_DIR/dsh.env")"
+          TOKEN="$(grep -o 'token=[A-Za-z0-9_-]*' bootstrap.log | tail -1 | cut -d= -f2)"
+          echo "::add-mask::$KEY"
+          echo "::add-mask::$TOKEN"
+
+          compose ps
+          sudo ss -tlnp | grep -E ':(3001|3080)\b'
+          refuse "3001/3080 never on a wildcard address" \
+            bash -c "sudo ss -tlnp | grep -E '(0\.0\.0\.0|\*|\[::\]):(3001|3080)\b'"
+
+          expect "FreeLLMAPI without key" 401 "$(code http://127.0.0.1:3001/v1/models)"
+          expect "FreeLLMAPI with synced key" 200 "$(code -H "Authorization: Bearer $KEY" http://127.0.0.1:3001/v1/models)"
+          refuse "first admin password removed from freellmapi.env" sudo grep -q FREEAPI_CONFIG_JSON "$DSH_DIR/freellmapi.env"
+          refuse "dsh container cannot read ENCRYPTION_KEY" compose exec -T dsh printenv ENCRYPTION_KEY
+
+          HOST=dsh.example.com
+          expect "dsh without token" 401 "$(code -H "Host: $HOST" http://127.0.0.1:3080/)"
+          expect "dsh with untrusted host" 403 "$(code -H 'Host: evil.example' http://127.0.0.1:3080/api/)"
+          expect "dsh token exchange" 303 "$(code -c jar -H "Host: $HOST" "http://127.0.0.1:3080/?token=$TOKEN")"
+          expect "dsh page with session cookie" 200 "$(code -b jar -H "Host: $HOST" http://127.0.0.1:3080/)"
+
+          grep -q 'DeepSeek Harness est prêt' bootstrap.log && echo "OK   banner printed"
+          grep -q 'https://dsh.example.com/?token=' bootstrap.log && echo "OK   banner has the public launch URL"
+
+      - name: Second run is idempotent
+        run: |
+          sudo DSH_DIR="$DSH_DIR" DSH_SOURCE_DIR="$PWD/deploy/oracle" \
+            bash deploy/oracle/bootstrap.sh > second.log 2>&1 || { sed -E 's/token=[A-Za-z0-9_-]+/token=***/' second.log; exit 1; }
+          grep -q 'DeepSeek Harness est prêt' second.log
+          if grep -q 'mot de passe' second.log; then echo "FAIL admin password printed again"; exit 1; fi
+          echo "OK   second run keeps secrets and prints no password"
+
+      - name: Logs on failure
+        if: failure()
+        run: |
+          sudo docker compose --project-directory "$DSH_DIR" -f "$DSH_DIR/compose.yml" logs --tail 80 \
+            | sed -E 's/token=[A-Za-z0-9_-]+/token=***/; s/freellmapi-[A-Za-z0-9_-]+/freellmapi-***/'
