@@ -1,0 +1,11 @@
+# Build context for deploy/oracle/Dockerfile: the image runs its own
+# `pnpm install` and `pnpm run build`, so local installs and outputs stay out.
+**/node_modules
+**/lib
+**/dist
+**/.venv
+**/.turbo
+**/*.tsbuildinfo
+.git
+tools/heretic/tests/*/model
+deploy/oracle/.env

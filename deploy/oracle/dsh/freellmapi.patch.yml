@@ -1,0 +1,42 @@
+# dsh patch layer for the server: one FreeLLMAPI route, no LLM-written titles.
+- id: llm-pi-ai
+  config:
+    providers:
+      freellmapi:
+        displayName: FreeLLMAPI
+        apiKeyEnv: FREE_LLM_API_KEY
+        api: openai-completions
+        baseURL: http://127.0.0.1:3001/v1
+        # FreeLLMAPI already rotates keys and fails over between models; a 429
+        # from it means every route is cooling down, so wait longer than the
+        # 10 s default before giving up the agent step.
+        retryPolicy:
+          mode: normal
+          maxRetries: 8
+          backoff:
+            initialDelayMs: 2000
+            maxDelayMs: 120000
+            jitterRatio: 0.2
+        models:
+          - id: auto
+            name: Auto (router picks the best available model)
+            contextWindow: 1048576
+          - id: deepseek-v4-flash
+            name: DeepSeek V4 Flash
+            contextWindow: 1048576
+          - id: gemini-3.8-flash
+            name: Gemini 3.8 Flash
+            contextWindow: 1048576
+          - id: qwen3.8-flash
+            name: Qwen3.8 Flash
+            contextWindow: 1000000
+- id: agent-default-model
+  name: '@deepseek-ai/dsh-agent-default-model'
+  config:
+    provider: freellmapi
+    model: auto
+# Each LLM-written session title spends FreeLLMAPI quota.
+- id: session-title-llm
+  disabled: true
+- id: optional-session-title-all-prompts
+  disabled: true
