@@ -67,7 +67,7 @@ export function findUnknownCasts(file: string, text: string): UnknownCast[] {
 
 function isSource(file: string): boolean {
   return /\.(?:[cm]?[jt]s|[jt]sx)$/u.test(file)
-    && !file.startsWith('vendor/')
+    && !file.startsWith('vendor/') && !file.startsWith('tools/')
     && !file.startsWith('.agents/notes/archived/')
 }
 

@@ -256,7 +256,7 @@ export function readRepositorySources(repoRoot: string = root): Map<string, stri
   const files = new Map<string, string>()
   for (const entry of listing.split('\0')) {
     const file = entry.replaceAll('\\', '/')
-    if (file === '' || file.startsWith('vendor/') || !SOURCE_EXTENSION.test(file)) continue
+    if (file === '' || file.startsWith('vendor/') || file.startsWith('tools/') || !SOURCE_EXTENSION.test(file)) continue
     try {
       files.set(file, readFileSync(resolve(repoRoot, file), 'utf8'))
     } catch (error: unknown) {

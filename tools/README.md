@@ -2,12 +2,33 @@
 
 Standalone programs that sit beside the harness without being part of it.
 Nothing here is a pnpm workspace package, and nothing here is compiled or
-linted by the TypeScript build.
+linted by the TypeScript build: `.oxlintrc.json`, `.jscpd.json` and the
+repository-wide `scripts/verify-*` gates skip `tools/` as they skip `vendor/`.
 
 | Path | What it is | License |
 |---|---|---|
+| `freellmapi/` | [FreeLLMAPI](https://github.com/tashfeenahmed/freellmapi), git subtree at `v0.16.12` (upstream commit `36826e7`) | MIT (see `freellmapi/LICENSE`) |
 | `heretic/` | [Heretic](https://github.com/p-e-w/heretic), git subtree at upstream commit `a2e626f` | AGPL-3.0 (see `heretic/LICENSE`) |
 | `skills/heretic/` | dsh skill that drives Heretic from an agent session | MIT, like the rest of the repository |
+
+## FreeLLMAPI
+
+The harness reaches FreeLLMAPI over its OpenAI-compatible `/v1` API (the
+`freellmapi` route of `llm-pi-ai`), never by importing its code. The
+`Deploy image` workflow builds `ghcr.io/<owner>/freellmapi` for amd64 and
+arm64 from this subtree with its own `Dockerfile`, and
+`deploy/oracle/compose.yml` runs that image beside the harness.
+
+Update it to a newer release:
+
+```sh
+git subtree pull --prefix=tools/freellmapi https://github.com/tashfeenahmed/freellmapi.git <tag> --squash
+```
+
+Then write the release's upstream commit into `tools/freellmapi.upstream-commit`
+(the image passes it as `FREELLMAPI_COMMIT_SHA`, which FreeLLMAPI's update
+checker compares against) and update the version in this file. FreeLLMAPI keeps its own
+tests: `cd tools/freellmapi && npm ci && npm test`.
 
 ## License boundary
 

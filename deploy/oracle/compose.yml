@@ -14,7 +14,8 @@
 
 services:
   freellmapi:
-    image: ghcr.io/tashfeenahmed/freellmapi:v0.16.12
+    # Built from the tools/freellmapi subtree by .github/workflows/deploy-image.yml.
+    image: ghcr.io/trinity667/freellmapi:latest
     env_file: freellmapi.env
     environment:
       NODE_ENV: production

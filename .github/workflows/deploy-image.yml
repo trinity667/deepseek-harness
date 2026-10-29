@@ -1,8 +1,10 @@
 name: Deploy image
 
-# Builds deploy/oracle/Dockerfile natively on amd64 and arm64 runners, pushes
-# each platform by digest, then joins them into one multi-arch tag on
-# ghcr.io/<owner>/deepseek-harness, which deploy/oracle/compose.yml pulls.
+# Builds the two images deploy/oracle/compose.yml pulls, natively on amd64 and
+# arm64 runners, pushes each platform by digest, then joins them into one
+# multi-arch tag per image:
+#   ghcr.io/<owner>/deepseek-harness  from deploy/oracle/Dockerfile (repository root)
+#   ghcr.io/<owner>/freellmapi        from the tools/freellmapi subtree
 on:
   push:
     branches: [master]
@@ -16,21 +18,29 @@ concurrency:
   group: deploy-image
   cancel-in-progress: true
 
-env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/deepseek-harness
-
 jobs:
   build:
-    name: Build ${{ matrix.platform }}
+    name: Build ${{ matrix.image }} ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
+        image: [deepseek-harness, freellmapi]
+        platform: [linux/amd64, linux/arm64]
         include:
           - platform: linux/amd64
             runner: ubuntu-24.04
           - platform: linux/arm64
             runner: ubuntu-24.04-arm
+          - image: deepseek-harness
+            context: .
+            file: deploy/oracle/Dockerfile
+            build-args: DSH_CLIENT_COMMIT_HASH=${{ github.sha }}
+          - image: freellmapi
+            context: tools/freellmapi
+            file: tools/freellmapi/Dockerfile
+            # FREELLMAPI_COMMIT_SHA is added below from tools/freellmapi.upstream-commit.
+            build-args: ''
     steps:
       - name: Check out code
         uses: actions/checkout@v6
@@ -45,17 +55,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # FreeLLMAPI's update checker compares the upstream commit the image was
+      # built from; the subtree records it in tools/freellmapi.upstream-commit.
+      - name: Read FreeLLMAPI upstream commit
+        if: matrix.image == 'freellmapi'
+        run: echo "EXTRA_BUILD_ARGS=FREELLMAPI_COMMIT_SHA=$(tr -d '[:space:]' < tools/freellmapi.upstream-commit)" >> "$GITHUB_ENV"
+
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: deploy/oracle/Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           platforms: ${{ matrix.platform }}
-          build-args: DSH_CLIENT_COMMIT_HASH=${{ github.sha }}
-          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=${{ matrix.platform }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
+          build-args: |
+            ${{ matrix.build-args }}
+            ${{ env.EXTRA_BUILD_ARGS }}
+          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.platform }}
 
       - name: Export digest
         run: |
@@ -66,21 +84,26 @@ jobs:
       - name: Upload digest
         uses: actions/upload-artifact@v4
         with:
-          name: digest-${{ matrix.runner }}
+          name: digest-${{ matrix.image }}-${{ matrix.runner }}
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
           retention-days: 1
 
   merge:
-    name: Publish multi-arch tag
+    name: Publish ${{ matrix.image }} multi-arch tag
     needs: build
     runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        image: [deepseek-harness, freellmapi]
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
     steps:
       - name: Download digests
         uses: actions/download-artifact@v4
         with:
           path: ${{ runner.temp }}/digests
-          pattern: digest-*
+          pattern: digest-${{ matrix.image }}-*
           merge-multiple: true
 
       - name: Set up Docker Buildx

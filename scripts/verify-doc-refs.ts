@@ -16,7 +16,7 @@ const PATTERNS = ['packages/**/*.ts']
 
 /** Paths excluded from the scan: built output and vendored upstream source. */
 const isExcluded = (p: string): boolean =>
-  p.includes('/lib/') || p.endsWith('.d.ts') || p.startsWith('vendor/')
+  p.includes('/lib/') || p.endsWith('.d.ts') || p.startsWith('vendor/') || p.startsWith('tools/')
 
 /** A non-first `lib` segment puts `/lib/` in every path below the directory, so the walker skips it. */
 const isExcludedDirectory = (dir: string): boolean => dir.split('/').slice(1).includes('lib')
