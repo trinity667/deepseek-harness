@@ -1,0 +1,15 @@
+// Browser preview of DeepSeek Harness on Cloudflare Workers (static assets only).
+// The whole harness runs inside a Web Worker in the visitor's browser, from the
+// packed VFS image; there is no server, no shell and no model key here.
+//
+// Cloudflare dashboard → Workers & Pages → deepseek-harness → Settings → Build:
+//   Build command:  bash deploy/cloudflare/build-preview.sh
+//   Deploy command: npx wrangler deploy --config deploy/cloudflare/wrangler.jsonc
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "deepseek-harness",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "../../apps/web/dist"
+  }
+}
