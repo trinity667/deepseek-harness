@@ -1,0 +1,53 @@
+name: Heretic
+
+# Runs the vendored Heretic checks from tools/heretic; GitHub ignores the
+# workflow inside the subtree, so this mirrors upstream's CI on one Python.
+on:
+  push:
+    branches: [master]
+    paths: ['tools/heretic/**', '.github/workflows/heretic.yml']
+  pull_request:
+    paths: ['tools/heretic/**', '.github/workflows/heretic.yml']
+
+jobs:
+  checks:
+    name: Check, test and build Heretic
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/heretic
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: tools/heretic/uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Lint and check import sorting
+        run: uv run ruff check --output-format=github --extend-select I .
+
+      - name: Check typing
+        run: uv run ty check --output-format=github --error-on-warning .
+
+      - name: Run tests
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          uv run python -m unittest discover -s tests -p 'test_*.py'
+          uv run tests/run_tests.py 2>&1
+
+      - name: Build package
+        run: uv build
