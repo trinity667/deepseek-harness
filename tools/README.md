@@ -15,7 +15,7 @@ repository-wide `scripts/verify-*` gates skip `tools/` as they skip `vendor/`.
 
 The harness reaches FreeLLMAPI over its OpenAI-compatible `/v1` API (the
 `freellmapi` route of `llm-pi-ai`), never by importing its code. The
-`Deploy image` workflow builds `ghcr.io/<owner>/freellmapi` for amd64 and
+`Deploy image` workflow builds `ghcr.io/<owner>/deepseek-harness-freellmapi` for amd64 and
 arm64 from this subtree with its own `Dockerfile`, and
 `deploy/oracle/compose.yml` runs that image beside the harness.
 

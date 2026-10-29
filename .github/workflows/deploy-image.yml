@@ -4,7 +4,7 @@ name: Deploy image
 # arm64 runners, pushes each platform by digest, then joins them into one
 # multi-arch tag per image:
 #   ghcr.io/<owner>/deepseek-harness  from deploy/oracle/Dockerfile (repository root)
-#   ghcr.io/<owner>/freellmapi        from the tools/freellmapi subtree
+#   ghcr.io/<owner>/deepseek-harness-freellmapi  from the tools/freellmapi subtree
 on:
   push:
     branches: [master]
@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [deepseek-harness, freellmapi]
+        image: [deepseek-harness, deepseek-harness-freellmapi]
         platform: [linux/amd64, linux/arm64]
         include:
           - platform: linux/amd64
@@ -36,7 +36,7 @@ jobs:
             context: .
             file: deploy/oracle/Dockerfile
             build-args: DSH_CLIENT_COMMIT_HASH=${{ github.sha }}
-          - image: freellmapi
+          - image: deepseek-harness-freellmapi
             context: tools/freellmapi
             file: tools/freellmapi/Dockerfile
             # FREELLMAPI_COMMIT_SHA is added below from tools/freellmapi.upstream-commit.
@@ -58,7 +58,7 @@ jobs:
       # FreeLLMAPI's update checker compares the upstream commit the image was
       # built from; the subtree records it in tools/freellmapi.upstream-commit.
       - name: Read FreeLLMAPI upstream commit
-        if: matrix.image == 'freellmapi'
+        if: matrix.image == 'deepseek-harness-freellmapi'
         run: echo "EXTRA_BUILD_ARGS=FREELLMAPI_COMMIT_SHA=$(tr -d '[:space:]' < tools/freellmapi.upstream-commit)" >> "$GITHUB_ENV"
 
       - name: Build and push by digest
@@ -95,7 +95,7 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        image: [deepseek-harness, freellmapi]
+        image: [deepseek-harness, deepseek-harness-freellmapi]
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
     steps:
