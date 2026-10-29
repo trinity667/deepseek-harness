@@ -5,9 +5,12 @@
 # idempotent: existing secrets and volumes are kept.
 #
 # Settings come from /opt/dsh/settings.env (written by cloud-init):
-#   DOMAIN                   Cloudflare zone; serves dsh.$DOMAIN and llm.$DOMAIN
-#   ADMIN_EMAIL              first FreeLLMAPI dashboard account
-#   CLOUDFLARE_TUNNEL_TOKEN  remote-managed tunnel token
+#   ADMIN_EMAIL              first FreeLLMAPI account, and the only address
+#                            allowed through the Quick Tunnels
+#   DOMAIN                   empty: no domain, protected *.trycloudflare.com
+#                            Quick Tunnels (new addresses on every boot);
+#                            set: serves dsh.$DOMAIN and llm.$DOMAIN
+#   CLOUDFLARE_TUNNEL_TOKEN  remote-managed tunnel token, only with DOMAIN
 #   REF                      optional git ref of this repository (default master)
 #
 # For tests, DSH_SOURCE_DIR=<checkout>/deploy/oracle copies the files from a
@@ -25,15 +28,24 @@ fail() { log "ERREUR: $*"; exit 1; }
 # shellcheck disable=SC1090
 . "$SETTINGS"
 REF="${REF:-master}"
+DOMAIN="${DOMAIN:-}"
 
-case "${DOMAIN:-}" in
-  ''|*mondomaine*|*' '*) fail "DOMAIN n'est pas rempli dans $SETTINGS" ;;
-esac
 [[ "${ADMIN_EMAIL:-}" =~ ^[^@[:space:]\"\\]+@[^@[:space:]\"\\]+\.[^@[:space:]\"\\]+$ ]] \
   || fail "ADMIN_EMAIL n'est pas une adresse e-mail valide dans $SETTINGS"
-case "${CLOUDFLARE_TUNNEL_TOKEN:-}" in
-  ''|*COLLE*) fail "CLOUDFLARE_TUNNEL_TOKEN n'est pas rempli dans $SETTINGS" ;;
-esac
+case "$ADMIN_EMAIL" in *@example.com) fail "ADMIN_EMAIL n'est pas rempli dans $SETTINGS" ;; esac
+
+if [ -z "$DOMAIN" ]; then
+  MODE=quick
+else
+  MODE=named
+  case "$DOMAIN" in
+    *mondomaine*|*' '*|http*|*/*) fail "DOMAIN doit être un nom de domaine seul (ex. mondomaine.com) dans $SETTINGS" ;;
+  esac
+  case "${CLOUDFLARE_TUNNEL_TOKEN:-}" in
+    ''|*COLLE*) fail "avec un DOMAIN, CLOUDFLARE_TUNNEL_TOKEN doit être rempli dans $SETTINGS" ;;
+  esac
+fi
+log "mode: $MODE"
 
 if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
   log "installation de Docker"
@@ -55,10 +67,15 @@ done
 chmod 755 "$DSH_DIR/bootstrap.sh"
 
 umask 077
-cat > "$DSH_DIR/.env" <<EOF
-DSH_PUBLIC_HOST=dsh.$DOMAIN
-CLOUDFLARE_TUNNEL_TOKEN=$CLOUDFLARE_TUNNEL_TOKEN
+write_env() { # write_env <dsh public host>
+  cat > "$DSH_DIR/.env" <<EOF
+COMPOSE_PROFILES=$MODE
+DSH_PUBLIC_HOST=$1
+ADMIN_EMAIL=$ADMIN_EMAIL
+CLOUDFLARE_TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
 EOF
+}
+if [ "$MODE" = named ]; then write_env "dsh.$DOMAIN"; else write_env pending.invalid; fi
 
 FIRST_ADMIN=""
 if [ ! -f "$DSH_DIR/freellmapi.env" ]; then
@@ -74,7 +91,7 @@ compose() { docker compose --project-directory "$DSH_DIR" -f "$DSH_DIR/compose.y
 
 log "démarrage de FreeLLMAPI"
 compose pull --quiet
-compose up -d freellmapi
+compose up -d --remove-orphans freellmapi
 for _ in $(seq 1 60); do
   [ "$(docker inspect -f '{{.State.Health.Status}}' "$(compose ps -q freellmapi)")" = healthy ] && break
   sleep 5
@@ -93,9 +110,30 @@ process.stdout.write(db.prepare(\"SELECT value FROM settings WHERE key = 'unifie
 [[ "$KEY" =~ ^freellmapi-[A-Za-z0-9_-]{16,}$ ]] || fail "clé unifiée illisible"
 printf 'FREE_LLM_API_KEY=%s\n' "$KEY" > "$DSH_DIR/dsh.env"
 
-log "démarrage du harness et du tunnel"
-# Recreate dsh so a regenerated key or a newer image is picked up.
-compose up -d --force-recreate dsh cloudflared
+quick_url() { # quick_url <service>: the trycloudflare address the tunnel announced
+  compose logs "$1" 2>/dev/null | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1 || true
+}
+
+if [ "$MODE" = quick ]; then
+  log "ouverture des tunnels protégés (trycloudflare)"
+  compose up -d --force-recreate quick-dsh quick-llm
+  DSH_URL="" LLM_URL=""
+  for _ in $(seq 1 40); do
+    DSH_URL="$(quick_url quick-dsh)"; LLM_URL="$(quick_url quick-llm)"
+    [ -n "$DSH_URL" ] && [ -n "$LLM_URL" ] && break
+    sleep 3
+  done
+  [ -n "$DSH_URL" ] && [ -n "$LLM_URL" ] || fail "les tunnels Cloudflare ne s'ouvrent pas (docker compose logs quick-dsh)"
+  write_env "${DSH_URL#https://}"
+  LLM_PUBLIC="$LLM_URL"
+  log "démarrage du harness"
+  # Recreate dsh so the new tunnel host, a regenerated key or a newer image is picked up.
+  compose up -d --force-recreate dsh
+else
+  LLM_PUBLIC="https://llm.$DOMAIN"
+  log "démarrage du harness et du tunnel"
+  compose up -d --force-recreate dsh cloudflared
+fi
 
 URL=""
 for _ in $(seq 1 60); do
@@ -108,7 +146,7 @@ done
 if command -v systemctl >/dev/null 2>&1 && [ -d /etc/systemd/system ] && [ -z "${DSH_SOURCE_DIR:-}" ]; then
   cat > /etc/systemd/system/dsh-bootstrap.service <<EOF
 [Unit]
-Description=DeepSeek Harness bootstrap (FreeLLMAPI key sync, launch URL)
+Description=DeepSeek Harness bootstrap (FreeLLMAPI key sync, tunnels, launch URL)
 After=docker.service network-online.target
 Wants=network-online.target
 Requires=docker.service
@@ -131,7 +169,7 @@ cat <<EOF
  DeepSeek Harness est prêt.
 
  Harness     : $URL
- FreeLLMAPI  : https://llm.$DOMAIN
+ FreeLLMAPI  : $LLM_PUBLIC
 EOF
 if [ -n "$FIRST_ADMIN" ]; then
   cat <<EOF
@@ -141,7 +179,14 @@ EOF
 fi
 cat <<EOF
 
- Le lien du harness contient un jeton valable jusqu'au prochain
- redémarrage. Ne le partage pas.
+ Accès réservé à $ADMIN_EMAIL (code envoyé par e-mail).
+EOF
+if [ "$MODE" = quick ]; then
+  cat <<EOF
+ Ces adresses changent à chaque redémarrage du serveur.
+EOF
+fi
+cat <<EOF
+ Le lien du harness contient un jeton : ne le partage pas.
 ==================================================================
 EOF

@@ -1,25 +1,29 @@
 #cloud-config
-# DeepSeek Harness + FreeLLMAPI + Cloudflare Tunnel, installés tout seuls.
+# DeepSeek Harness + FreeLLMAPI + Cloudflare, installés tout seuls.
 # À coller dans Oracle : Create instance → Advanced options → Management →
 # « Paste cloud-init script ».
 #
 # ┌──────────────────────────────────────────────────────────────────────┐
-# │  REMPLIS LES 3 VALEURS CI-DESSOUS (et rien d'autre)                  │
+# │  REMPLIS TON E-MAIL CI-DESSOUS                                       │
 # │                                                                      │
-# │  DOMAIN                  ton domaine Cloudflare, sans « https:// »   │
-# │                          (le harness sera sur dsh.<domaine>,         │
-# │                           FreeLLMAPI sur llm.<domaine>)              │
-# │  ADMIN_EMAIL             ton e-mail (compte FreeLLMAPI)              │
-# │  CLOUDFLARE_TUNNEL_TOKEN le jeton du tunnel Cloudflare (eyJ...)      │
+# │  ADMIN_EMAIL   ton e-mail : c'est la seule adresse qui pourra entrer │
+# │                (code envoyé par e-mail) et le compte FreeLLMAPI      │
+# │                                                                      │
+# │  Sans nom de domaine : laisse DOMAIN et CLOUDFLARE_TUNNEL_TOKEN      │
+# │  vides. Tu auras des adresses gratuites en *.trycloudflare.com,      │
+# │  qui changent à chaque redémarrage du serveur.                       │
+# │                                                                      │
+# │  Avec ton domaine Cloudflare (plus tard) : DOMAIN=mondomaine.com et  │
+# │  le jeton du tunnel (eyJ...) dans CLOUDFLARE_TUNNEL_TOKEN.           │
 # └──────────────────────────────────────────────────────────────────────┘
 write_files:
   - path: /opt/dsh/settings.env
     permissions: '0600'
     owner: root:root
     content: |
-      DOMAIN=mondomaine.com
       ADMIN_EMAIL=toi@example.com
-      CLOUDFLARE_TUNNEL_TOKEN=COLLE_ICI_LE_JETON_DU_TUNNEL
+      DOMAIN=
+      CLOUDFLARE_TUNNEL_TOKEN=
       REF=master
 
 # ── Rien à modifier en dessous ───────────────────────────────────────────

@@ -3,9 +3,12 @@ name: Deploy Oracle test
 # Proves deploy/oracle on the same CPU architecture as an Oracle Ampere VM:
 # validates cloud-init.yaml with cloud-init's own schema checker, runs
 # bootstrap.sh from this checkout against the freshly published image, then
-# checks that both services listen on loopback only, that FreeLLMAPI enforces
-# its key and dsh its launch token. cloudflared gets a dummy token here and is
-# expected to keep restarting.
+# checks that both services listen on loopback only and that FreeLLMAPI
+# enforces its key and dsh its launch token.
+#   quick: real protected Quick Tunnels; the public address must stop an
+#          unauthenticated visitor before dsh, even one holding the token.
+#   named: own-domain mode with a dummy tunnel token (cloudflared keeps
+#          restarting; only the local stack is checked).
 on:
   workflow_run:
     workflows: [Deploy image]
@@ -17,10 +20,20 @@ permissions:
 
 jobs:
   bootstrap:
-    name: Bootstrap on arm64
+    name: Bootstrap on arm64 (${{ matrix.mode }})
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: quick
+            domain: ''
+            token: ''
+          - mode: named
+            domain: example.com
+            token: ci-dummy-token
     env:
       # The runner context is not available at job level, so use a fixed path.
       DSH_DIR: /tmp/dsh-oracle
@@ -39,13 +52,14 @@ jobs:
       - name: Run bootstrap.sh
         run: |
           mkdir -p "$DSH_DIR"
-          cat > "$DSH_DIR/settings.env" <<'EOF'
-          DOMAIN=example.com
-          ADMIN_EMAIL=ci@example.com
-          CLOUDFLARE_TUNNEL_TOKEN=ci-dummy-token
+          cat > "$DSH_DIR/settings.env" <<EOF
+          ADMIN_EMAIL=ci@example.org
+          DOMAIN=${{ matrix.domain }}
+          CLOUDFLARE_TUNNEL_TOKEN=${{ matrix.token }}
           EOF
           sudo DSH_DIR="$DSH_DIR" DSH_SOURCE_DIR="$PWD/deploy/oracle" \
-            bash deploy/oracle/bootstrap.sh > bootstrap.log 2>&1 || { cat bootstrap.log; exit 1; }
+            bash deploy/oracle/bootstrap.sh > bootstrap.log 2>&1 \
+            || { sed -E 's/token=[A-Za-z0-9_-]+/token=***/' bootstrap.log; exit 1; }
           # Show the banner without the launch token or the admin password.
           sed -E 's/token=[A-Za-z0-9_-]+/token=***/; s/(mot de passe[^:]*: ).*/\1***/' bootstrap.log
 
@@ -63,8 +77,10 @@ jobs:
 
           KEY="$(sudo sed -n 's/^FREE_LLM_API_KEY=//p' "$DSH_DIR/dsh.env")"
           TOKEN="$(grep -o 'token=[A-Za-z0-9_-]*' bootstrap.log | tail -1 | cut -d= -f2)"
+          HOST="$(sudo sed -n 's/^DSH_PUBLIC_HOST=//p' "$DSH_DIR/.env")"
           echo "::add-mask::$KEY"
           echo "::add-mask::$TOKEN"
+          echo "dsh public host: $HOST"
 
           compose ps
           sudo ss -tlnp | grep -E ':(3001|3080)\b'
@@ -76,19 +92,36 @@ jobs:
           refuse "first admin password removed from freellmapi.env" sudo grep -q FREEAPI_CONFIG_JSON "$DSH_DIR/freellmapi.env"
           refuse "dsh container cannot read ENCRYPTION_KEY" compose exec -T dsh printenv ENCRYPTION_KEY
 
-          HOST=dsh.example.com
           expect "dsh without token" 401 "$(code -H "Host: $HOST" http://127.0.0.1:3080/)"
           expect "dsh with untrusted host" 403 "$(code -H 'Host: evil.example' http://127.0.0.1:3080/api/)"
           expect "dsh token exchange" 303 "$(code -c jar -H "Host: $HOST" "http://127.0.0.1:3080/?token=$TOKEN")"
           expect "dsh page with session cookie" 200 "$(code -b jar -H "Host: $HOST" http://127.0.0.1:3080/)"
 
           grep -q 'DeepSeek Harness est prêt' bootstrap.log && echo "OK   banner printed"
-          grep -q 'https://dsh.example.com/?token=' bootstrap.log && echo "OK   banner has the public launch URL"
+          grep -q "https://$HOST/?token=" bootstrap.log && echo "OK   banner has the public launch URL"
+
+          if [ "${{ matrix.mode }}" = quick ]; then
+            case "$HOST" in *.trycloudflare.com) echo "OK   quick tunnel host $HOST" ;; *) echo "FAIL quick host: $HOST"; exit 1 ;; esac
+            # Through the real tunnel, a visitor with the launch token but no
+            # e-mail PIN must not reach dsh: no 303 and no dsh session cookie.
+            for _ in $(seq 1 20); do
+              STATUS="$(curl -s -o body.html -D headers.txt -w '%{http_code}' "https://$HOST/?token=$TOKEN" || true)"
+              case "$STATUS" in 000|502|503|530) sleep 6 ;; *) break ;; esac
+            done
+            echo "public status: $STATUS"
+            grep -i '^location:' headers.txt | sed -E 's/token=[A-Za-z0-9_-]+/token=***/' || true
+            if [ "$STATUS" = 303 ] || grep -qi '^set-cookie: dsh-auth' headers.txt; then
+              echo "FAIL the public address reached dsh without the e-mail PIN"; exit 1
+            fi
+            case "$STATUS" in 000|502|503|530) echo "FAIL tunnel never answered ($STATUS)"; exit 1 ;; esac
+            echo "OK   public address stops visitors before dsh ($STATUS)"
+          fi
 
       - name: Second run is idempotent
         run: |
           sudo DSH_DIR="$DSH_DIR" DSH_SOURCE_DIR="$PWD/deploy/oracle" \
-            bash deploy/oracle/bootstrap.sh > second.log 2>&1 || { sed -E 's/token=[A-Za-z0-9_-]+/token=***/' second.log; exit 1; }
+            bash deploy/oracle/bootstrap.sh > second.log 2>&1 \
+            || { sed -E 's/token=[A-Za-z0-9_-]+/token=***/' second.log; exit 1; }
           grep -q 'DeepSeek Harness est prêt' second.log
           if grep -q 'mot de passe' second.log; then echo "FAIL admin password printed again"; exit 1; fi
           echo "OK   second run keeps secrets and prints no password"

@@ -4,7 +4,8 @@
 #
 # Secrets are split per service so the agent's shell (inside `dsh`) never sees
 # FreeLLMAPI's encryption key or admin password:
-#   .env            compose interpolation only: DSH_PUBLIC_HOST, CLOUDFLARE_TUNNEL_TOKEN
+#   .env            compose interpolation only: COMPOSE_PROFILES (quick or named),
+#                   DSH_PUBLIC_HOST, ADMIN_EMAIL, CLOUDFLARE_TUNNEL_TOKEN
 #   freellmapi.env  ENCRYPTION_KEY, optional FREEAPI_CONFIG_JSON (first admin)
 #   dsh.env         FREE_LLM_API_KEY (FreeLLMAPI's unified key)
 #
@@ -55,7 +56,10 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # With your own domain (COMPOSE_PROFILES=named): a remote-managed tunnel whose
+  # hostnames and Cloudflare Access policy live in the Zero Trust dashboard.
   cloudflared:
+    profiles: [named]
     image: cloudflare/cloudflared:2026.10.6
     network_mode: host
     command: tunnel --no-autoupdate run
@@ -63,6 +67,24 @@ services:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on:
       - dsh
+    restart: unless-stopped
+
+  # Without a domain (COMPOSE_PROFILES=quick): two protected Quick Tunnels on
+  # random *.trycloudflare.com hosts; visitors must enter a one-time PIN sent
+  # to ADMIN_EMAIL. The hosts change whenever these containers restart, so
+  # bootstrap.sh starts them first and hands dsh the new host.
+  quick-dsh:
+    profiles: [quick]
+    image: cloudflare/cloudflared:2026.10.6
+    network_mode: host
+    command: tunnel --no-autoupdate --url http://127.0.0.1:3080 --allowed-mail ${ADMIN_EMAIL}
+    restart: unless-stopped
+
+  quick-llm:
+    profiles: [quick]
+    image: cloudflare/cloudflared:2026.10.6
+    network_mode: host
+    command: tunnel --no-autoupdate --url http://127.0.0.1:3001 --allowed-mail ${ADMIN_EMAIL}
     restart: unless-stopped
 
 volumes:
