@@ -43,7 +43,9 @@ uv run --project <repo>/tools/heretic --directory <work> heretic \
   --save-directory model
 ```
 
-Add `--quantization bnb_4bit` when VRAM is tight. The run benchmarks the
+On Windows, Heretic's terminal UI needs a real console: it fails under Git
+Bash and when its output is redirected, so start it in its own PowerShell or
+cmd window. Add `--quantization bnb_4bit` when VRAM is tight. The run benchmarks the
 batch size, then optimizes; expect 20–60 minutes on one GPU. Start it as a
 background job and wait for the completion notice instead of polling.
 
